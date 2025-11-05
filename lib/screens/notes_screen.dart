@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:appwrite/models.dart';
+import 'package:notes_app/services/note_service.dart';
 import 'package:notes_app/components/note_item.dart';
 import 'package:notes_app/components/note_input_dialog.dart';
 
@@ -10,78 +12,101 @@ class NotesScreen extends StatefulWidget {
 }
 
 class _NotesScreenState extends State<NotesScreen> {
-  // Sample initial notes data
-  List<Map<String, dynamic>> notes = [
-    {
-      'id': '1',
-      'content': 'Learn Flutter',
-      'createdAt': DateTime.now().toIso8601String(),
-    },
-    {
-      'id': '2',
-      'content': 'Complete the tutorial',
-      'createdAt': DateTime.now().toIso8601String(),
-    },
-  ];
+  final NoteService _noteService = NoteService();
 
-  // Controllers and state variables
-  TextEditingController noteController = TextEditingController();
-  Map<String, dynamic>? editingNote;
+  List<Document> _notes = [];
+  bool _isLoading = true;
+  String? _errorMessage;
 
-  // Function to save a new or updated note
-  void saveNote() {
-    if (noteController.text.trim().isEmpty) return;
+  final TextEditingController _noteController = TextEditingController();
+  Document? _editingNote;
 
-    setState(() {
-      if (editingNote != null) {
-        // Update existing note
-        for (int i = 0; i < notes.length; i++) {
-          if (notes[i]['id'] == editingNote!['id']) {
-            notes[i] = {
-              ...notes[i],
-              'content': noteController.text,
-              'updatedAt': DateTime.now().toIso8601String(),
-            };
-            break;
-          }
-        }
-        editingNote = null;
+  @override
+  void initState() {
+    super.initState();
+    _fetchNotes();
+  }
+
+  // ✅ Charger toutes les notes depuis Appwrite
+  Future<void> _fetchNotes() async {
+    try {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+      final notes = await _noteService.getNotes();
+      setState(() {
+        _notes = notes;
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = "Erreur lors du chargement : $e";
+      });
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  // ✅ Créer ou mettre à jour une note
+  Future<void> _saveNote() async {
+    if (_noteController.text.trim().isEmpty) return;
+
+    try {
+      final noteData = {'content': _noteController.text};
+      if (_editingNote != null) {
+        // Mettre à jour (send a map)
+        await _noteService.updateNote(_editingNote!.$id, noteData);
+        await _fetchNotes();
       } else {
-        // Add new note
-        final newNote = {
-          'id': DateTime.now().millisecondsSinceEpoch.toString(),
-          'content': noteController.text,
-          'createdAt': DateTime.now().toIso8601String(),
-        };
-        notes.insert(0, newNote);
+        // Créer
+        final newNote = await _noteService.createNote(noteData);
+        setState(() {
+          _notes.insert(0, newNote);
+        });
       }
-    });
+    } catch (e) {
+      print("Erreur lors de l’enregistrement : $e");
+    }
 
-    noteController.clear();
+    _noteController.clear();
+    _editingNote = null;
   }
 
-  // Function to delete a note
-  void deleteNote(String id) {
+  // ✅ Supprimer une note
+  Future<void> _deleteNote(String noteId) async {
+    try {
+      await _noteService.deleteNote(noteId);
+      _handleNoteDeleted(noteId);
+    } catch (e) {
+      print("Erreur de suppression : $e");
+    }
+  }
+
+  // ✅ Retirer la note supprimée de la liste locale
+  void _handleNoteDeleted(String noteId) {
     setState(() {
-      notes.removeWhere((note) => note['id'] == id);
+      _notes = _notes.where((note) => note.$id != noteId).toList();
     });
   }
 
-  // Function to open edit mode
-  void editNote(Map<String, dynamic> note) {
-    editingNote = note;
-    noteController.text = note['content'];
-    showNoteDialog();
-  }
+  // ✅ Ouvrir la boîte de dialogue pour ajouter ou modifier une note
+  void _showNoteDialog({Document? note}) {
+    if (note != null) {
+      _editingNote = note;
+      _noteController.text = note.data['content'];
+    } else {
+      _editingNote = null;
+      _noteController.clear();
+    }
 
-  // Show dialog for adding/editing notes using the NoteInputDialog component
-  void showNoteDialog() {
     showDialog(
       context: context,
       builder: (context) => NoteInputDialog(
-        controller: noteController,
-        isEditing: editingNote != null,
-        onSave: saveNote,
+        controller: _noteController,
+        isEditing: _editingNote != null,
+        onSave: _saveNote,
       ),
     );
   }
@@ -91,16 +116,16 @@ class _NotesScreenState extends State<NotesScreen> {
     return Scaffold(
       body: Column(
         children: [
-          // Header with title and add button
+          // ✅ En-tête
           Container(
             height: 100,
             color: Colors.blue,
-            padding: EdgeInsets.only(bottom: 15, left: 20, right: 20),
+            padding: const EdgeInsets.only(bottom: 15, left: 20, right: 20),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
+                const Text(
                   'My Notes',
                   style: TextStyle(
                     color: Colors.white,
@@ -109,11 +134,7 @@ class _NotesScreenState extends State<NotesScreen> {
                   ),
                 ),
                 InkWell(
-                  onTap: () {
-                    editingNote = null;
-                    noteController.clear();
-                    showNoteDialog();
-                  },
+                  onTap: () => _showNoteDialog(),
                   child: Container(
                     width: 36,
                     height: 36,
@@ -121,7 +142,7 @@ class _NotesScreenState extends State<NotesScreen> {
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(18),
                     ),
-                    child: Center(
+                    child: const Center(
                       child: Text(
                         '+',
                         style: TextStyle(
@@ -137,26 +158,30 @@ class _NotesScreenState extends State<NotesScreen> {
             ),
           ),
 
-          // Notes list or empty state
+          // ✅ Corps : chargement / erreur / liste
           Expanded(
-            child: notes.isNotEmpty
-                ? ListView.builder(
-                    padding: EdgeInsets.all(15),
-                    itemCount: notes.length,
-                    itemBuilder: (context, index) {
-                      return NoteItem(
-                        note: notes[index],
-                        onEdit: editNote,
-                        onDelete: deleteNote,
-                      );
-                    },
-                  )
-                : Center(
-                    child: Text(
-                      'No notes yet. Create one!',
-                      style: TextStyle(fontSize: 18, color: Color(0xFF7F8C8D)),
-                    ),
-                  ),
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _errorMessage != null
+                    ? Center(child: Text(_errorMessage!))
+                    : RefreshIndicator(
+                        onRefresh: _fetchNotes,
+                        child: ListView.builder(
+                          padding: const EdgeInsets.all(15),
+                          itemCount: _notes.length,
+                          itemBuilder: (context, index) {
+                            final note = _notes[index];
+                            final Map<String, dynamic> noteMap =
+                                Map<String, dynamic>.from(note.data as Map);
+                            noteMap['id'] = note.$id;
+                            return NoteItem(
+                              note: noteMap,
+                              onEdit: (n) => _showNoteDialog(note: note),
+                              onDelete: (id) => _deleteNote(id),
+                            );
+                          },
+                        ),
+                      ),
           ),
         ],
       ),
@@ -165,8 +190,7 @@ class _NotesScreenState extends State<NotesScreen> {
 
   @override
   void dispose() {
-    // Clean up the controller when the widget is disposed
-    noteController.dispose();
+    _noteController.dispose();
     super.dispose();
   }
 }

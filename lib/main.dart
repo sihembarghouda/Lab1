@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:notes_app/screens/home_screen.dart';
 import 'package:notes_app/screens/notes_screen.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-void main() {
+Future<void> main() async {
+  // Ensure Flutter bindings are initialized before loading async resources
+  WidgetsFlutterBinding.ensureInitialized();
+  // Load environment variables
+  await dotenv.load(fileName: '.env');
   runApp(const MyApp());
 }
 
@@ -20,5 +25,6 @@ class MyApp extends StatelessWidget {
         '/notes': (context) => const NotesScreen(),
       },
     );
+    
   }
 }
